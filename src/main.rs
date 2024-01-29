@@ -1,6 +1,6 @@
 use convert_case::{Case, Casing};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Pair {
     key: String,
     value: String,
@@ -31,6 +31,7 @@ impl Pair {
             "text" => self.govalue = "string".into(),
             "timestamp(0)" => self.govalue = "time.Time".into(),
             "uuid" => self.govalue = "pgxuuid.uuid".into(),
+            "float" => self.govalue = "float32".into(),
             _ => self.govalue = self.value.clone(),
         }
     }
@@ -42,7 +43,17 @@ impl GoStruct {
 
         s += &format!("type {} struct {{\n", self.go_type_name);
         for member in &self.members {
-            s += &format!("\t{}: {}\n", member.gokey, member.govalue)
+            if member.key == "version" {
+                s += &format!(
+                    "\t{} {} `db:\"-\"`\n",
+                    member.gokey, member.govalue
+                )
+            } else {
+                s += &format!(
+                    "\t{} {} `db:\"{}\"`\n",
+                    member.gokey, member.govalue, member.key
+                )
+            }
         }
 
         s += "}\n";
@@ -99,7 +110,13 @@ impl GoStruct {
             .members
             .iter()
             .filter(|m| should_create(&m.key))
-            .map(|m| format!("{}.{}", self.go_type_name.to_case(Case::Camel), m.gokey))
+            .map(|m| {
+                format!(
+                    "{}.{}",
+                    self.go_type_name.to_case(Case::Camel),
+                    m.gokey
+                )
+            })
             .collect::<Vec<String>>()
             .join(", ");
 
@@ -212,7 +229,13 @@ RETURNING version`\n\n",
             .members
             .iter()
             .filter(|m| should_create(&m.gokey))
-            .map(|m| format!("{}.{}", self.go_type_name.to_case(Case::Camel), m.gokey))
+            .map(|m| {
+                format!(
+                    "{}.{}",
+                    self.go_type_name.to_case(Case::Camel),
+                    m.gokey
+                )
+            })
             .collect::<Vec<String>>()
             .join(", ");
 
@@ -333,6 +356,21 @@ fn main() {
 
         if words[0] == ");" {
             started = false;
+            for pair in &mut pairs {
+                pair.to_godb();
+            }
+
+            go_struct.members = pairs.clone();
+
+            println!("{}", go_struct.make_go_type());
+
+            println!("{}", go_struct.make_go_create());
+            println!("{}", go_struct.make_go_get());
+            println!("{}", go_struct.make_go_update());
+            println!("{}", go_struct.make_go_delete());
+
+            go_struct = GoStruct::default();
+            pairs = Vec::new();
             continue;
         }
 
@@ -344,17 +382,4 @@ fn main() {
             pairs.push(pair);
         }
     }
-
-    for pair in &mut pairs {
-        pair.to_godb();
-    }
-
-    go_struct.members = pairs;
-
-    println!("{}", go_struct.make_go_type());
-
-    println!("{}", go_struct.make_go_create());
-    println!("{}", go_struct.make_go_get());
-    println!("{}", go_struct.make_go_update());
-    println!("{}", go_struct.make_go_delete());
 }
