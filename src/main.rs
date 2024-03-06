@@ -21,6 +21,7 @@ impl Pair {
             self.gokey = self.key.to_case(Case::Upper);
         } else {
             self.gokey = self.key.to_case(Case::Pascal);
+            self.gokey = self.gokey.replace("Id", "ID");
         }
 
         // bool is bool
@@ -43,17 +44,10 @@ impl GoStruct {
 
         s += &format!("type {} struct {{\n", self.go_type_name);
         for member in &self.members {
-            if member.key == "version" {
-                s += &format!(
-                    "\t{} {} `db:\"-\"`\n",
-                    member.gokey, member.govalue
-                )
-            } else {
-                s += &format!(
-                    "\t{} {} `db:\"{}\"`\n",
-                    member.gokey, member.govalue, member.key
-                )
-            }
+            s += &format!(
+                "\t{} {} `db:\"{}\"`\n",
+                member.gokey, member.govalue, member.key
+            )
         }
 
         s += "}\n";
@@ -67,9 +61,7 @@ impl GoStruct {
         s += &format!(
             "func Create{}({} *{}, db DB) error {{\n",
             self.go_type_name,
-            self.sql_type_name
-                .strip_suffix("s")
-                .unwrap_or(&self.sql_type_name),
+            self.go_type_name.to_case(Case::Camel),
             self.go_type_name
         );
 
@@ -104,7 +96,7 @@ impl GoStruct {
 
 ";
 
-        s += "\terr := db.QueryRow(ctx, q";
+        s += "\terr := db.QueryRow(ctx, q, ";
 
         s += &self
             .members
@@ -141,7 +133,7 @@ impl GoStruct {
         let mut s = String::new();
 
         s += &format!(
-            "func Get{}(id *{}, db DB) (*{}, error) {{\n",
+            "func Get{}(id {}, db DB) (*{}, error) {{\n",
             self.go_type_name,
             self.id_type(),
             self.go_type_name,
