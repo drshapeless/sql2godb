@@ -1,3 +1,4 @@
+use clap::{ArgAction, Parser};
 use convert_case::{Case, Casing};
 
 #[derive(Default, Clone)]
@@ -65,7 +66,7 @@ impl GoStruct {
             self.go_type_name
         );
 
-        s += "\tq := `INSERT INTO users (";
+        s += &format!("\tq := `INSERT INTO {} (", self.sql_type_name);
 
         s += &self
             .members
@@ -284,6 +285,144 @@ RETURNING version`\n\n",
         s
     }
 
+    fn make_go_create_no_version(&self) -> String {
+        let mut s = String::new();
+
+        s += &format!(
+            "func Create{}({} *{}, db DB) error {{\n",
+            self.go_type_name,
+            self.go_type_name.to_case(Case::Camel),
+            self.go_type_name
+        );
+
+        s += &format!("\tq := `INSERT INTO {} (", self.sql_type_name);
+
+        s += &self
+            .members
+            .iter()
+            .filter(|m| should_create(&m.key))
+            .map(|m| m.key.to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        s += ")\n";
+
+        s += "VALUES (";
+
+        s += &self
+            .members
+            .iter()
+            .filter(|m| should_create(&m.key))
+            .enumerate()
+            .map(|(i, _)| format!("${}", i + 1))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        s += ")\n";
+        s += "RETURNING id`\n\n";
+
+        s += "\tctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+\tdefer cancel()
+
+";
+
+        s += "\terr := db.QueryRow(ctx, q, ";
+
+        s += &self
+            .members
+            .iter()
+            .filter(|m| should_create(&m.key))
+            .map(|m| {
+                format!(
+                    "{}.{}",
+                    self.go_type_name.to_case(Case::Camel),
+                    m.gokey
+                )
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        s += &format!(
+            ").Scan(&{}.ID)\n\n",
+            self.go_type_name.to_case(Case::Camel)
+        );
+
+        s += "\tif err != nil {
+\t\treturn err
+\t}
+
+\treturn nil
+}
+";
+
+        s
+    }
+
+    fn make_go_update_no_version(&self) -> String {
+        let mut counter = 0;
+        let mut s = String::new();
+
+        s += &format!(
+            "func Update{}({} *{}, db DB) error {{\n",
+            self.go_type_name,
+            self.go_type_name.to_case(Case::Camel),
+            self.go_type_name
+        );
+
+        s += &format!(
+            "\tq := `UPDATE {}
+SET ",
+            self.sql_type_name
+        );
+
+        s += &self
+            .members
+            .iter()
+            .filter(|m| should_create(&m.gokey))
+            .enumerate()
+            .map(|(i, m)| {
+                counter = i.into();
+                format!("{} = ${}", m.key, i + 1)
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        s += "\n";
+
+        s += &format!("WHERE id = ${}`\n\n", counter + 2);
+
+        s += "\tctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+\tdefer cancel()
+
+\t_, err := db.Exec(ctx, q, ";
+
+        s += &self
+            .members
+            .iter()
+            .filter(|m| should_create(&m.gokey))
+            .map(|m| {
+                format!(
+                    "{}.{}",
+                    self.go_type_name.to_case(Case::Camel),
+                    m.gokey
+                )
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        s += &format!(", {}.ID)\n\n", self.go_type_name.to_case(Case::Camel));
+
+        s += "\tif err != nil {
+\t\treturn err
+\t}
+
+\treturn nil
+}
+";
+
+        s
+    }
+
     fn id_type(&self) -> String {
         for member in &self.members {
             if member.gokey == "ID" {
@@ -309,12 +448,22 @@ fn should_create(s: &str) -> bool {
     }
 }
 
+#[derive(Parser)]
+struct Args {
+    #[arg(long, action=ArgAction::SetTrue)]
+    no_version: bool,
+}
+
 fn main() {
+    let args = Args::parse();
+    let no_version = args.no_version;
     let stdin = std::io::stdin();
 
     let mut started = false;
     let mut pairs: Vec<Pair> = Vec::new();
     let mut go_struct = GoStruct::default();
+
+    println!("package data");
 
     for line in stdin.lines() {
         let l: String;
@@ -356,9 +505,17 @@ fn main() {
 
             println!("{}", go_struct.make_go_type());
 
-            println!("{}", go_struct.make_go_create());
+            if no_version {
+                println!("{}", go_struct.make_go_create_no_version());
+            } else {
+                println!("{}", go_struct.make_go_create());
+            }
             println!("{}", go_struct.make_go_get());
-            println!("{}", go_struct.make_go_update());
+            if no_version {
+                println!("{}", go_struct.make_go_update_no_version());
+            } else {
+                println!("{}", go_struct.make_go_update());
+            }
             println!("{}", go_struct.make_go_delete());
 
             go_struct = GoStruct::default();
