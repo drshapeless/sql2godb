@@ -155,7 +155,7 @@ func (self *SqlType) createFunc() string {
 			continue
 		}
 
-		query_fields = append(query_fields, fmt.Sprintf("%s.%s", single, pascal))
+		query_fields = append(query_fields, fmt.Sprintf("%s.%s", single, v.Name))
 	}
 
 	s += fmt.Sprintf(db_query, strings.Join(query_fields, ", "), strings.Join(scan_fields, ", "))
@@ -314,11 +314,11 @@ func main() {
 		sql_type.Items = append(sql_type.Items, p)
 	}
 
-	println("package data\n")
-
-	println(sql_type.typeStruct())
-	println(sql_type.createFunc())
-	println(sql_type.getFunc())
-	println(sql_type.updateFunc())
-	println(sql_type.deleteFunc())
+	final_string := "package data\n\n"
+	final_string += sql_type.typeStruct() + "\n"
+	final_string += sql_type.createFunc() + "\n"
+	final_string += sql_type.getFunc() + "\n"
+	final_string += sql_type.updateFunc() + "\n"
+	final_string += sql_type.deleteFunc() + "\n"
+	fmt.Print(final_string)
 }
