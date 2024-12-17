@@ -151,11 +151,11 @@ func (self *SqlType) createFunc() string {
 	scan_fields := []string{}
 	for _, v := range self.Items {
 		if v.Name == "version" || v.Name == "id" {
-			scan_fields = append(scan_fields, fmt.Sprintf("&%s.%s", single, pascal))
+			scan_fields = append(scan_fields, fmt.Sprintf("&%s.%s", single, snake_to_pascal(v.Name)))
 			continue
 		}
 
-		query_fields = append(query_fields, fmt.Sprintf("%s.%s", single, v.Name))
+		query_fields = append(query_fields, fmt.Sprintf("%s.%s", single, snake_to_pascal(v.Name)))
 	}
 
 	s += fmt.Sprintf(db_query, strings.Join(query_fields, ", "), strings.Join(scan_fields, ", "))
