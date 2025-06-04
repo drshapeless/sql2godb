@@ -5,6 +5,9 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 type Pair struct {
@@ -27,7 +30,8 @@ func snake_to_pascal(snakeStr string) string {
 	// Capitalize each word
 	for _, word := range words {
 		if len(word) > 0 {
-			capitalizedWord := strings.Title(word) // Capitalize the first letter
+			caser := cases.Title(language.AmericanEnglish)
+			capitalizedWord := caser.String(word) // Capitalize the first letter
 			pascalWords = append(pascalWords, capitalizedWord)
 		}
 	}
@@ -39,8 +43,14 @@ func snake_to_pascal(snakeStr string) string {
 	return s
 }
 
+func remove_trailing_comma(s string) string {
+	return strings.TrimSuffix(s, ",")
+}
+
 func sqltype_to_gotype(sql_type_name string) string {
-	switch sql_type_name {
+	real_name := remove_trailing_comma(sql_type_name)
+
+	switch real_name {
 	case "bigserial":
 		fallthrough
 	case "bigint":
@@ -69,7 +79,7 @@ func plural_to_single(s string) string {
 	return strings.TrimSuffix(s, "s")
 }
 
-func (self *SqlType) typeStruct() string {
+func (st *SqlType) typeStruct() string {
 	format := `type %s struct {
 %s
 }
@@ -77,7 +87,7 @@ func (self *SqlType) typeStruct() string {
 
 	itemStr := ""
 
-	for _, v := range self.Items {
+	for _, v := range st.Items {
 		itemStr += "\t"
 		itemStr += snake_to_pascal(v.Name)
 		itemStr += "\t"
@@ -87,16 +97,16 @@ func (self *SqlType) typeStruct() string {
 		itemStr += "\n"
 	}
 
-	t := snake_to_pascal(plural_to_single(self.TableName))
+	t := snake_to_pascal(plural_to_single(st.TableName))
 
 	s := fmt.Sprintf(format, t, itemStr)
 	return s
 }
 
-func (self *SqlType) createFunc() string {
+func (st *SqlType) createFunc() string {
 	s := ""
 
-	single := plural_to_single(self.TableName)
+	single := plural_to_single(st.TableName)
 	pascal := snake_to_pascal(single)
 
 	s += fmt.Sprintf("func Create%s(%s *%s, db DB) error {\n", pascal, single, pascal)
@@ -109,7 +119,7 @@ func (self *SqlType) createFunc() string {
 	i := 1
 	hasID := false
 	hasVersion := false
-	for _, v := range self.Items {
+	for _, v := range st.Items {
 		if v.Name == "id" {
 			hasID = true
 			continue
@@ -141,7 +151,7 @@ func (self *SqlType) createFunc() string {
 		returnStr = "RETURNING " + returnStr
 	}
 
-	s += fmt.Sprintf(sql, self.TableName, columnStr, numberStr, returnStr)
+	s += fmt.Sprintf(sql, st.TableName, columnStr, numberStr, returnStr)
 
 	s += "\tctx, cancel := context.WithTimeout(context.Background(), time.Second*3)\n\tdefer cancel()\n\n"
 
@@ -149,7 +159,7 @@ func (self *SqlType) createFunc() string {
 
 	query_fields := []string{}
 	scan_fields := []string{}
-	for _, v := range self.Items {
+	for _, v := range st.Items {
 		if v.Name == "version" || v.Name == "id" {
 			scan_fields = append(scan_fields, fmt.Sprintf("&%s.%s", single, snake_to_pascal(v.Name)))
 			continue
@@ -169,15 +179,15 @@ func (self *SqlType) createFunc() string {
 	return s
 }
 
-func (self *SqlType) getFunc() string {
+func (st *SqlType) getFunc() string {
 	s := ""
 
-	single := plural_to_single(self.TableName)
+	single := plural_to_single(st.TableName)
 	pascal := snake_to_pascal(single)
 
 	s += fmt.Sprintf("func Get%s(id int64, db DB) (*%s, error) {\n", pascal, pascal)
 
-	s += fmt.Sprintf("\tq := `SELECT * FROM %s WHERE id = $1`\n\n", self.TableName)
+	s += fmt.Sprintf("\tq := `SELECT * FROM %s WHERE id = $1`\n\n", st.TableName)
 
 	s += "\tctx, cancel := context.WithTimeout(context.Background(), time.Second*3)\n\tdefer cancel()\n\n"
 
@@ -194,10 +204,10 @@ func (self *SqlType) getFunc() string {
 	return s
 }
 
-func (self *SqlType) updateFunc() string {
+func (st *SqlType) updateFunc() string {
 	s := ""
 
-	single := plural_to_single(self.TableName)
+	single := plural_to_single(st.TableName)
 	pascal := snake_to_pascal(single)
 
 	s += fmt.Sprintf("func Update%s(%s *%s, db DB) error {\n", pascal, single, pascal)
@@ -206,7 +216,7 @@ func (self *SqlType) updateFunc() string {
 
 	columns := []string{}
 	i := 1
-	for _, v := range self.Items {
+	for _, v := range st.Items {
 		if v.Name == "id" {
 			continue
 		}
@@ -225,14 +235,14 @@ func (self *SqlType) updateFunc() string {
 	i += 1
 	whereStr += fmt.Sprintf(" AND version = $%d", i)
 
-	s += fmt.Sprintf(query, self.TableName, columnStr, whereStr)
+	s += fmt.Sprintf(query, st.TableName, columnStr, whereStr)
 
 	s += "\tctx, cancel := context.WithTimeout(context.Background(), time.Second*3)\n\tdefer cancel()\n\n"
 
 	query_row := "\terr := db.QueryRow(ctx, q, %s).Scan(%s)\n\n"
 
 	fields := []string{}
-	for _, v := range self.Items {
+	for _, v := range st.Items {
 		if v.Name == "version" || v.Name == "id" {
 			continue
 		}
@@ -253,14 +263,14 @@ func (self *SqlType) updateFunc() string {
 	return s
 }
 
-func (self *SqlType) deleteFunc() string {
+func (st *SqlType) deleteFunc() string {
 	s := ""
 
-	single := plural_to_single(self.TableName)
+	single := plural_to_single(st.TableName)
 	pascal := snake_to_pascal(single)
 
 	s += fmt.Sprintf("func Delete%s(id int64, db DB) error {\n", pascal)
-	s += fmt.Sprintf("\tq := `DELETE FROM %s WHERE id = $1`\n\n", self.TableName)
+	s += fmt.Sprintf("\tq := `DELETE FROM %s WHERE id = $1`\n\n", st.TableName)
 
 	s += "\tctx, cancel := context.WithTimeout(context.Background(), time.Second*3)\n\tdefer cancel()\n\n"
 
