@@ -10,14 +10,15 @@ import (
 	"golang.org/x/text/language"
 )
 
-type Pair struct {
-	Name string
-	Type string
+type Item struct {
+	Name    string
+	Type    string
+	NotNull bool
 }
 
 type SqlType struct {
 	TableName string
-	Items     []Pair
+	Items     []Item
 }
 
 func snake_to_pascal(snakeStr string) string {
@@ -91,6 +92,9 @@ func (st *SqlType) typeStruct() string {
 		itemStr += "\t"
 		itemStr += snake_to_pascal(v.Name)
 		itemStr += "\t"
+		if !v.NotNull {
+			itemStr += "*"
+		}
 		itemStr += sqltype_to_gotype(v.Type)
 		itemStr += "\t"
 		itemStr += fmt.Sprintf("`db:\"%s\"`", v.Name)
@@ -212,16 +216,18 @@ func (st *SqlType) updateFunc() string {
 
 	s += fmt.Sprintf("func Update%s(%s *%s, db DB) error {\n", pascal, single, pascal)
 
-	query := "\tq := `UPDATE %s\nSET %s\nWHERE %s\nRETURNING version`\n\n"
+	query := "\tq := `UPDATE %s\nSET %s\nWHERE %s\n%s`\n\n"
 
 	columns := []string{}
 	i := 1
+	hasVersion := false
 	for _, v := range st.Items {
 		if v.Name == "id" {
 			continue
 		}
 
 		if v.Name == "version" {
+			hasVersion = true
 			continue
 		}
 
@@ -235,7 +241,15 @@ func (st *SqlType) updateFunc() string {
 	i += 1
 	whereStr += fmt.Sprintf(" AND version = $%d", i)
 
-	s += fmt.Sprintf(query, st.TableName, columnStr, whereStr)
+	returnStr := ""
+	if hasVersion {
+		returnStr = "version"
+	}
+	if returnStr != "" {
+		returnStr = "RETURNING " + returnStr
+	}
+
+	s += fmt.Sprintf(query, st.TableName, columnStr, whereStr, returnStr)
 
 	s += "\tctx, cancel := context.WithTimeout(context.Background(), time.Second*3)\n\tdefer cancel()\n\n"
 
@@ -297,6 +311,9 @@ func main() {
 
 	sql_type := SqlType{}
 
+	fmt.Print("package data\n\n")
+	is_in_type := false
+
 	for _, line := range strings.Split(my_string, "\n") {
 		if line == "" {
 			continue
@@ -309,26 +326,34 @@ func main() {
 		if strings.HasPrefix(line, "CREATE") {
 			words := strings.Split(line, " ")
 			sql_type.TableName = words[len(words)-2]
+			is_in_type = true
 			continue
 		}
 
 		if strings.HasPrefix(line, ");") {
-			break
+			if is_in_type {
+				final_string := ""
+				final_string += sql_type.typeStruct() + "\n"
+				final_string += sql_type.createFunc() + "\n"
+				final_string += sql_type.getFunc() + "\n"
+				final_string += sql_type.updateFunc() + "\n"
+				final_string += sql_type.deleteFunc() + "\n"
+				fmt.Print(final_string)
+				is_in_type = false
+				sql_type = SqlType{}
+			}
+
+			continue
 		}
 
+		is_not_null := strings.Contains(line, "NOT NULL") || strings.Contains(line, "PRIMARY KEY")
+
 		words := strings.Split(strings.TrimSpace(line), " ")
-		p := Pair{
-			Name: words[0],
-			Type: words[1],
+		p := Item{
+			Name:    words[0],
+			Type:    words[1],
+			NotNull: is_not_null,
 		}
 		sql_type.Items = append(sql_type.Items, p)
 	}
-
-	final_string := "package data\n\n"
-	final_string += sql_type.typeStruct() + "\n"
-	final_string += sql_type.createFunc() + "\n"
-	final_string += sql_type.getFunc() + "\n"
-	final_string += sql_type.updateFunc() + "\n"
-	final_string += sql_type.deleteFunc() + "\n"
-	fmt.Print(final_string)
 }
