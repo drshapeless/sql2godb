@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +11,8 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+const VERSION = "v0.1.1"
 
 type Item struct {
 	Name    string
@@ -134,6 +138,10 @@ func (st *SqlType) createFunc() string {
 			continue
 		}
 
+		if v.Name == "created_at" || v.Name == "edited_at" {
+			continue
+		}
+
 		columns = append(columns, v.Name)
 		numbers = append(numbers, fmt.Sprintf("$%d", i))
 		i += 1
@@ -184,6 +192,17 @@ func (st *SqlType) createFunc() string {
 }
 
 func (st *SqlType) getFunc() string {
+	hasID := false
+	for _, v := range st.Items {
+		if v.Name == "id" {
+			hasID = true
+		}
+	}
+
+	if !hasID {
+		return ""
+	}
+
 	s := ""
 
 	single := plural_to_single(st.TableName)
@@ -220,14 +239,24 @@ func (st *SqlType) updateFunc() string {
 
 	columns := []string{}
 	i := 1
+	hasID := false
 	hasVersion := false
 	for _, v := range st.Items {
 		if v.Name == "id" {
-			continue
+			hasID = true
 		}
 
 		if v.Name == "version" {
 			hasVersion = true
+			continue
+		}
+
+		if v.Name == "created_at" || v.Name == "created_by" {
+			continue
+		}
+
+		if v.Name == "edited_at" {
+			columns = append(columns, "edited_at = NOW()")
 			continue
 		}
 
@@ -236,7 +265,9 @@ func (st *SqlType) updateFunc() string {
 	}
 
 	columnStr := strings.Join(columns, ", ")
-	columnStr += ", version = version + 1"
+	if hasVersion {
+		columnStr += ", version = version + 1"
+	}
 	whereStr := fmt.Sprintf("id = $%d", i)
 	i += 1
 	whereStr += fmt.Sprintf(" AND version = $%d", i)
@@ -244,6 +275,8 @@ func (st *SqlType) updateFunc() string {
 	returnStr := ""
 	if hasVersion {
 		returnStr = "version"
+	} else {
+		return ""
 	}
 	if returnStr != "" {
 		returnStr = "RETURNING " + returnStr
@@ -257,14 +290,18 @@ func (st *SqlType) updateFunc() string {
 
 	fields := []string{}
 	for _, v := range st.Items {
-		if v.Name == "version" || v.Name == "id" {
+		if v.Name == "version" || v.Name == "id" || v.Name == "created_at" || v.Name == "created_by" || v.Name == "edited_at" {
 			continue
 		}
 
 		fields = append(fields, fmt.Sprintf("%s.%s", single, snake_to_pascal(v.Name)))
 	}
-	fields = append(fields, fmt.Sprintf("%s.ID", single))
-	fields = append(fields, fmt.Sprintf("%s.Version", single))
+	if hasID {
+		fields = append(fields, fmt.Sprintf("%s.ID", single))
+	}
+	if hasVersion {
+		fields = append(fields, fmt.Sprintf("%s.Version", single))
+	}
 
 	s += fmt.Sprintf(query_row, strings.Join(fields, ", "), fmt.Sprintf("&%s.Version", single))
 
@@ -278,6 +315,17 @@ func (st *SqlType) updateFunc() string {
 }
 
 func (st *SqlType) deleteFunc() string {
+	hasID := false
+	for _, v := range st.Items {
+		if v.Name == "id" {
+			hasID = true
+		}
+	}
+
+	if !hasID {
+		return ""
+	}
+
 	s := ""
 
 	single := plural_to_single(st.TableName)
@@ -302,7 +350,48 @@ func (st *SqlType) deleteFunc() string {
 }
 
 func main() {
-	data, err := io.ReadAll(os.Stdin)
+	version := flag.Bool("version", false, "show version")
+	input_file := flag.String("i", "", "input file path")
+	output_file := flag.String("o", "", "output file path")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "sql2godb - SQL to Go code generator\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: sql2godb [-i] [-o]\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nIf no input or output file is specified, stdin and stdout will be used.\n")
+	}
+
+	flag.Parse()
+
+	if *version {
+		fmt.Printf("sql2godb %s", VERSION)
+		return
+	}
+
+	ifile := os.Stdin
+	ofile := os.Stdout
+
+	if *input_file != "" {
+		file, err := os.OpenFile(*input_file, os.O_RDONLY, 0644)
+		if err != nil {
+			fmt.Errorf("Cannot open file %v\n", err)
+			return
+		}
+
+		ifile = file
+	}
+
+	if *output_file != "" {
+		file, err := os.OpenFile(*output_file, os.O_RDWR|os.O_CREATE, 0755)
+		if err != nil {
+			fmt.Errorf("Cannot open file %v", err)
+			return
+		}
+
+		ofile = file
+	}
+
+	data, err := io.ReadAll(ifile)
 	if err != nil {
 		panic("stdin is fucked")
 	}
@@ -311,7 +400,9 @@ func main() {
 
 	sql_type := SqlType{}
 
-	fmt.Print("package data\n\n")
+	var buffer bytes.Buffer
+
+	fmt.Fprint(&buffer, "package data\n\n")
 	is_in_type := false
 
 	for _, line := range strings.Split(my_string, "\n") {
@@ -338,7 +429,7 @@ func main() {
 				final_string += sql_type.getFunc() + "\n"
 				final_string += sql_type.updateFunc() + "\n"
 				final_string += sql_type.deleteFunc() + "\n"
-				fmt.Print(final_string)
+				fmt.Fprint(&buffer, final_string)
 				is_in_type = false
 				sql_type = SqlType{}
 			}
@@ -356,4 +447,6 @@ func main() {
 		}
 		sql_type.Items = append(sql_type.Items, p)
 	}
+
+	fmt.Fprint(ofile, buffer.String())
 }
