@@ -441,7 +441,8 @@ func main() {
 			continue
 		}
 
-		if strings.HasPrefix(strings.TrimLeft(line, " "), "PRIMARY KEY") {
+		trimmed_line := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed_line, "PRIMARY KEY") || strings.HasPrefix(trimmed_line, "UNIQUE") {
 			continue
 		}
 
