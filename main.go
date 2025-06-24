@@ -264,6 +264,10 @@ func (st *SqlType) updateFunc() string {
 		i += 1
 	}
 
+	if !hasID {
+		return ""
+	}
+
 	columnStr := strings.Join(columns, ", ")
 	if hasVersion {
 		columnStr += ", version = version + 1"
@@ -434,6 +438,10 @@ func main() {
 				sql_type = SqlType{}
 			}
 
+			continue
+		}
+
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "PRIMARY KEY") {
 			continue
 		}
 
