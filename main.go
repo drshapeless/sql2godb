@@ -12,7 +12,7 @@ import (
 	"golang.org/x/text/language"
 )
 
-const VERSION = "v0.1.1"
+const VERSION = "v0.1.3"
 
 type Item struct {
 	Name    string
