@@ -12,7 +12,7 @@ import (
 	"golang.org/x/text/language"
 )
 
-const VERSION = "v0.1.3"
+const VERSION = "v0.1.4"
 
 type Item struct {
 	Name    string
@@ -244,6 +244,7 @@ func (st *SqlType) updateFunc() string {
 	for _, v := range st.Items {
 		if v.Name == "id" {
 			hasID = true
+			continue
 		}
 
 		if v.Name == "version" {
@@ -264,17 +265,23 @@ func (st *SqlType) updateFunc() string {
 		i += 1
 	}
 
-	if !hasID {
-		return ""
-	}
-
 	columnStr := strings.Join(columns, ", ")
 	if hasVersion {
 		columnStr += ", version = version + 1"
 	}
-	whereStr := fmt.Sprintf("id = $%d", i)
-	i += 1
-	whereStr += fmt.Sprintf(" AND version = $%d", i)
+
+	whereStr := ""
+	if hasID {
+		whereStr += fmt.Sprintf("id = $%d", i)
+		i += 1
+	}
+
+	if hasVersion {
+		if hasID {
+			whereStr += " AND "
+		}
+		whereStr += fmt.Sprintf("version = $%d", i)
+	}
 
 	returnStr := ""
 	if hasVersion {
