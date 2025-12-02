@@ -1,0 +1,4 @@
+#+title: readme
+
+sql2godb is a cli tool to generate simple crud go code from an SQL
+schema.
