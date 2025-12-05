@@ -27,6 +27,12 @@ Lexer :: struct {
     tokens: [..]Token;
 }
 
+report_error :: (lexer: *Lexer, format: string, arguments: .. Any) {
+    log(format, .. arguments);
+
+    log("... at line %, character %.\n", lexer.current_line_number, lexer.current_column_number);
+}
+
 eat_character :: (using lexer: *Lexer) {
     if input.data[input_cursor] == #char "\n" {
         current_line_number += 1;
@@ -58,7 +64,12 @@ tokenize :: (input: string) -> []Token {
         } else if is_alpha(c) {
             read_identifier(*lexer);
         } else if is_digit(c) {
-
+            read_number(*lexer);
+        } else if c == {
+        case #char "\"";
+            #through;
+        case #char "'";
+            read_string(*lexer);
         }
     }
 }
@@ -114,7 +125,10 @@ read_number :: (lexer: *Lexer) {
             eat_character(lexer);
         } else if c == #char "." {
             dot_count += 1;
-            assert(dot_count <= 1, "Error at % %, number with 2 dots", t.line, t.col);
+            if dot_count > 1 {
+                report_error(lexer, "number with 2 dots");
+                exit(-1);
+            }
             eat_character(lexer);
         } else {
             break;
@@ -134,7 +148,10 @@ read_number :: (lexer: *Lexer) {
                 eat_character(lexer);
             } else if c == #char "-" {
                 negative_count += 1;
-                assert(negative_count <= 1, "Error at % %, number with 2 minus", t.line, t.col);
+                if negative_count > 1 {
+                    report_error(lexer, "number with 2 minus");
+                    exit(-1);
+                }
                 eat_character(lexer);
             } else {
                 break;
@@ -144,6 +161,35 @@ read_number :: (lexer: *Lexer) {
 
     t.str = slice(lexer.input, start, lexer.input_cursor - start + 1);
 
+    array_add(*lexer.tokens, t);
+}
+
+read_string :: (lexer: *Lexer) {
+    quote_char, ok := peek_next_character(lexer);
+    if !ok return; // This check is redundant
+
+    start := lexer.input_cursor;
+    t := Token.{
+        type = .STRING,
+        line = lexer.current_line_number,
+        col  = lexer.current_column_number,
+    };
+
+    eat_character(lexer);
+
+    prev_char: u8;
+    while 1 {
+        c, ok := peek_next_character(lexer);
+        if !ok break;
+
+        eat_character(lexer);
+        if c == quote_char && prev_char != #char "\\" {
+            break;
+        }
+        prev_char = c;
+    }
+
+    t.str = slice(lexer.input, start, lexer.input_cursor - start + 1);
     array_add(*lexer.tokens, t);
 }
 
