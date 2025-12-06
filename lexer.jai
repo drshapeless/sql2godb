@@ -7,7 +7,8 @@ Token_Type :: enum {
     R_PAREN;
     SEMICOLON;
     COMMA;
-    COMMENT;
+    LINE_COMMENT;
+    BLOCK_COMMENT;
 
     OP_ADD;
     OP_SUBTRACT;
@@ -258,7 +259,7 @@ read_operator :: (lexer: *Lexer) {
             eat_character(lexer);
             t.str.count = 2;
         } else if nc == #char "-" {
-            t.type = .COMMENT;
+            t.type = .LINE_COMMENT;
             eat_character(lexer);
 
             // This is a line comment, read until the end of line
@@ -291,7 +292,7 @@ read_operator :: (lexer: *Lexer) {
             t.str.count = 2;
         } else if nc == #char "*" {
             // Block comment
-            t.type = .COMMENT;
+            t.type = .BLOCK_COMMENT;
             while 1 {
                 comment_char, ok := peek_next_character(lexer);
                 if !ok break;
