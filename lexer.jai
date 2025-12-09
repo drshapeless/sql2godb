@@ -21,9 +21,9 @@ Token_Type :: enum {
     OP_BIT_XOR;
 
     OP_EQUAL;
-    OP_GRATER;
+    OP_GREATER;
     OP_LESS;
-    OP_GRATER_AND_EQUAL;
+    OP_GREATER_AND_EQUAL;
     OP_LESS_AND_EQUAL;
     OP_NOT_EQUAL;
 
@@ -359,11 +359,11 @@ read_operator :: (lexer: *Lexer) {
         }
     case #char ">";
         if nc == #char "=" {
-            t.type = .OP_GRATER_AND_EQUAL;
+            t.type = .OP_GREATER_AND_EQUAL;
             eat_character(lexer);
             t.str.count = 2;
         } else {
-            t.type = .OP_GRATER;
+            t.type = .OP_GREATER;
         }
     case #char "=";
         t.type = .OP_EQUAL;
