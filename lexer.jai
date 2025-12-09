@@ -35,6 +35,8 @@ Token_Type :: enum {
     OP_BIT_AND_EQUALS;
     OP_BIT_OR_EQUALS;
     OP_BIT_EXCLUSIVE_EQUALS;
+
+    #insert #run generate_keyword_enum();
 }
 
 Token :: struct {
@@ -135,6 +137,10 @@ read_identifier :: (lexer: *Lexer) {
         }
     }
     t.str = slice(lexer.input, start_cursor, lexer.input_cursor - start_cursor);
+    upper_str := to_upper_copy(t.str);
+
+    #insert #run generate_keyword_switch_cases();
+
     array_add(*lexer.tokens, t);
 }
 
@@ -376,5 +382,40 @@ read_operator :: (lexer: *Lexer) {
     array_add(*lexer.tokens, t);
 }
 
+#scope_file
+
+KEYWORDS :: #run get_keywords();
+
+get_keywords :: () -> []string {
+    s := read_entire_file("keywords.txt");
+    return split(s, #char "\n");
+}
+
+generate_keyword_enum :: () -> string {
+    sb: String_Builder;
+    for KEYWORDS {
+        if it != "" {
+            append(*sb, sprint("KEYWORD_%;\n", it));
+        }
+    }
+
+    return builder_to_string(*sb);
+}
+
+generate_keyword_switch_cases :: () -> string {
+    sb: String_Builder;
+    append(*sb, "if upper_str == {\n");
+    for KEYWORDS {
+        if it != "" {
+            append(*sb, sprint("case \"%\";\nt.type = .KEYWORD_%;\n", it, it));
+        }
+    }
+
+    append(*sb, "}");
+
+    return builder_to_string(*sb);
+}
+
 #import "String";
 #import "Basic";
+#import "File";

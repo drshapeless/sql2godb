@@ -2,3 +2,5 @@
 
 sql2godb is a cli tool to generate simple crud go code from an SQL
 schema.
+
+~keywords.txt~ is copy from https://sqlite.org/lang_keywords.html
