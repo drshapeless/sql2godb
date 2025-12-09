@@ -137,7 +137,8 @@ read_identifier :: (lexer: *Lexer) {
         }
     }
     t.str = slice(lexer.input, start_cursor, lexer.input_cursor - start_cursor);
-    upper_str := to_upper_copy(t.str);
+    upper_str := to_upper_copy(t.str,, temp);
+    defer reset_temporary_storage();
 
     #insert #run generate_keyword_switch_cases();
 
@@ -402,6 +403,7 @@ generate_keyword_enum :: () -> string {
     return builder_to_string(*sb);
 }
 
+// This is definitely a very slow way to compare string, but computer is fast.
 generate_keyword_switch_cases :: () -> string {
     sb: String_Builder;
     append(*sb, "if upper_str == {\n");
