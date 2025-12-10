@@ -19,10 +19,13 @@ Argument :: struct {
 Schema_Member :: struct {
     name: string;
     type: string;
+    go_name: string;
 }
 
 Schema :: struct {
     name: string;
+    go_name: string;
+    var_name: string;
     members: []Schema_Member;
 }
 
@@ -50,7 +53,8 @@ parse_sql :: (file_name: string) -> string {
     sb: String_Builder;
     print(*sb, COMMON_HEADER);
 
-    for sc: parser.schemas {
+    for * sc: parser.schemas {
+        fill_names(sc);
         write_struct(*sb, sc);
     }
 
@@ -165,6 +169,17 @@ skip_comments :: (using parser: *Parser) {
     }
 }
 
+fill_names :: (sc: *Schema) {
+    sc.go_name = snake_to_pascal(sc.name);
+    vname := copy_string(sc.go_name);
+    vname[0] = to_lower(vname[0]);
+    sc.var_name = vname;
+
+    for * m: sc.members {
+        m.go_name = snake_to_pascal(m.name);
+    }
+}
+
 snake_to_pascal :: (s: string) -> string {
     should_be_cap := true;
     sb: String_Builder;
@@ -190,10 +205,10 @@ plural_to_single :: (s: string) -> string {
     return s;
 }
 
-write_struct :: (sb: *String_Builder, schema: Schema) {
-    print(sb, "type % struct {\n", plural_to_single(snake_to_pascal(schema.name)));
-    for m: schema.members {
-        print(sb, "\t%\t%\n", snake_to_pascal(m.name), m.type);
+write_struct :: (sb: *String_Builder, sc: *Schema) {
+    print(sb, "type % struct {\n", sc.go_name);
+    for m: sc.members {
+        print(sb, "\t%\t%\n", m.go_name, m.type);
     }
     print(sb, "}\n");
 }
@@ -207,6 +222,69 @@ get_go_filename :: (name: string) -> string {
     s := slice(name, i + CREATE.count, name.count - i - CREATE.count - TABLE_UP.count);
 
     return sprint("%.go", s);
+}
+
+EXCLUDE_MEMBERS :: string.[
+"id",
+"created_at",
+"updated_at",
+"version"
+];
+
+RETURN_MEMBERS :: string.[
+"id",
+"version"
+];
+
+match_strings :: (s: string, matches: []string) -> bool {
+    for matches {
+        if s == it {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+CONTEXT_STR :: #string DONE
+        ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+        defer cancel()
+DONE
+
+write_create_func :: (sb: *String_Builder, sc: *Schema) {
+    print(sb, "func Create%(% *%, db *sql.DB) error {\n", sc.go_name);
+    append(sb, "\tq := `INSERT INTO ");
+    append(sb, sc.name);
+    append(sb, " (");
+
+    useful_mems: [..]string;
+    ret_mems: [..]string;
+    for sc.members {
+        if !match_strings(it.name, EXCLUDE_MEMBERS) {
+            array_add(*useful_mems, it.name);
+        }
+
+        if match_strings(it.name, RETURN_MEMBERS) {
+            array_add(*ret_mems, it.name);
+        }
+    }
+
+    append(sb, join(..useful_mems, ", "));
+    append(sb, ")\nVALUES (");
+    for 0..useful_mems.count - 1 {
+        append(sb, "?");
+        if it != useful_mems.count - 2 {
+            append(sb, ", ");
+        }
+    }
+    append(sb, ")\nRETURNING ");
+    append(sb, join(..ret_mems, ", "));
+    append(sb, "`\n\n");
+    append(sb, CONTEXT_STR);
+    append(sb, "\n");
+
+    // TODO: not finished
+    append(sb, "}\n\n");
 }
 
 #import "Basic";
