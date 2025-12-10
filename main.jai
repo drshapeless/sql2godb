@@ -1,11 +1,19 @@
 main :: () {
-    files := file_list("migrations");
+    ok, args := parse_arguments(Argument);
+
+    files := file_list(args.input_dir);
 
     for files {
         if ends_with(it, ".up.sql") {
-            parse_sql(it);
+            content := parse_sql(it);
+            write_entire_file(sprint("%/%.go", args.output_dir, get_go_filename(it)), content);
         }
     }
+}
+
+Argument :: struct {
+    input_dir: string; @"?Input directory"
+    output_dir: string; @"?Output directory"
 }
 
 Schema_Member :: struct {
@@ -24,7 +32,7 @@ Parser :: struct {
     schemas: [..]Schema;
 }
 
-parse_sql :: (file_name: string) {
+parse_sql :: (file_name: string) -> string {
     s := read_entire_file(file_name);
 
     tokens := tokenize(s);
@@ -34,14 +42,32 @@ parse_sql :: (file_name: string) {
     };
 
     while parser.pos < parser.tokens.count {
+        skip_comments(*parser);
         read_schema(*parser);
         skip_comments(*parser);
     }
 
-    for parser.schemas {
-        log("%", it);
+    sb: String_Builder;
+    print(*sb, COMMON_HEADER);
+
+    for sc: parser.schemas {
+        write_struct(*sb, sc);
     }
+
+    return builder_to_string(*sb);
 }
+
+COMMON_HEADER :: #string DONE
+package data
+
+import (
+    "context"
+    "database/sql"
+
+    "github.com/georgysavva/scany/v2/sqlscan"
+)
+
+DONE
 
 read_schema :: (using parser: *Parser) {
     if tokens.count - pos < 2 {
@@ -139,8 +165,53 @@ skip_comments :: (using parser: *Parser) {
     }
 }
 
+snake_to_pascal :: (s: string) -> string {
+    should_be_cap := true;
+    sb: String_Builder;
+    for c: s {
+        if c == #char "_" {
+            should_be_cap = true;
+        } else if should_be_cap {
+            append(*sb, to_upper(c));
+            should_be_cap = false;
+        } else {
+            append(*sb, c);
+        }
+    }
+
+    return builder_to_string(*sb);
+}
+
+plural_to_single :: (s: string) -> string {
+    if ends_with(s, "s") {
+        return trim_right(s, "s");
+    }
+
+    return s;
+}
+
+write_struct :: (sb: *String_Builder, schema: Schema) {
+    print(sb, "type % struct {\n", plural_to_single(snake_to_pascal(schema.name)));
+    for m: schema.members {
+        print(sb, "\t%\t%\n", snake_to_pascal(m.name), m.type);
+    }
+    print(sb, "}\n");
+}
+
+get_go_filename :: (name: string) -> string {
+    CREATE :: "create_";
+    TABLE_UP :: "_table.up.sql";
+
+    i := find_index_from_left(name, CREATE);
+
+    s := slice(name, i + CREATE.count, name.count - i - CREATE.count - TABLE_UP.count);
+
+    return sprint("%.go", s);
+}
+
 #import "Basic";
 #import "File";
 #import "File_Utilities";
 #import,file "lexer.jai";
 #import "String";
+#import "Command_Line";
