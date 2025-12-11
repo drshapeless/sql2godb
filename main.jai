@@ -6,7 +6,7 @@ main :: () {
     for files {
         if ends_with(it, ".up.sql") {
             content := parse_sql(it);
-            write_entire_file(sprint("%/%.go", args.output_dir, get_go_filename(it)), content);
+            write_entire_file(sprint("%/%", args.output_dir, get_go_filename(it)), content);
         }
     }
 }
@@ -56,6 +56,7 @@ parse_sql :: (file_name: string) -> string {
     for * sc: parser.schemas {
         fill_names(sc);
         write_struct(*sb, sc);
+        write_create_func(*sb, sc);
     }
 
     return builder_to_string(*sb);
@@ -67,6 +68,7 @@ package data
 import (
     "context"
     "database/sql"
+    "time"
 
     "github.com/georgysavva/scany/v2/sqlscan"
 )
@@ -170,10 +172,10 @@ skip_comments :: (using parser: *Parser) {
 }
 
 fill_names :: (sc: *Schema) {
-    sc.go_name = snake_to_pascal(sc.name);
+    sc.go_name = plural_to_single(snake_to_pascal(sc.name));
     vname := copy_string(sc.go_name);
     vname[0] = to_lower(vname[0]);
-    sc.var_name = vname;
+    sc.var_name = plural_to_single(vname);
 
     for * m: sc.members {
         m.go_name = snake_to_pascal(m.name);
@@ -189,6 +191,8 @@ snake_to_pascal :: (s: string) -> string {
         } else if should_be_cap {
             append(*sb, to_upper(c));
             should_be_cap = false;
+        } else if c == #char "d" && it_index > 0 && s[it_index - 1] == #char "i" && (it_index + 1 == s.count || s[it_index + 1] == #char "_") {
+            append(*sb, to_upper(c));
         } else {
             append(*sb, c);
         }
@@ -208,9 +212,9 @@ plural_to_single :: (s: string) -> string {
 write_struct :: (sb: *String_Builder, sc: *Schema) {
     print(sb, "type % struct {\n", sc.go_name);
     for m: sc.members {
-        print(sb, "\t%\t%\n", m.go_name, m.type);
+        print(sb, "\t%\t% `db:\"%\"`\n", m.go_name, m.type, m.name);
     }
-    print(sb, "}\n");
+    print(sb, "}\n\n");
 }
 
 get_go_filename :: (name: string) -> string {
@@ -247,43 +251,82 @@ match_strings :: (s: string, matches: []string) -> bool {
 }
 
 CONTEXT_STR :: #string DONE
-        ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-        defer cancel()
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+    defer cancel()
 DONE
 
-write_create_func :: (sb: *String_Builder, sc: *Schema) {
-    print(sb, "func Create%(% *%, db *sql.DB) error {\n", sc.go_name);
-    append(sb, "\tq := `INSERT INTO ");
-    append(sb, sc.name);
-    append(sb, " (");
+EN_STR :: #string DONE
+    if err != nil {
+        return err
+    }
+    return nil
+DONE
 
-    useful_mems: [..]string;
-    ret_mems: [..]string;
+repeat_string :: (s: string, count: int, separator := ", ") -> string {
+    sb: String_Builder;
+    i := count;
+    while i > 0 {
+        append(*sb, s);
+        if i > 1 {
+            append(*sb, separator);
+        }
+        i -= 1;
+    }
+
+    return builder_to_string(*sb);
+}
+
+join_sql_name :: (mems: []Schema_Member) -> string {
+    sb: String_Builder;
+
+    for mems {
+        append(*sb, it.name);
+        if it_index < mems.count - 1 {
+            append(*sb, ", ");
+        }
+    }
+
+    return builder_to_string(*sb);
+}
+
+join_go_name :: (mems: []Schema_Member, prefix: string = "") -> string {
+    sb: String_Builder;
+
+    for mems {
+        append(*sb, prefix);
+        append(*sb, it.go_name);
+        if it_index < mems.count - 1 {
+            append(*sb, ", ");
+        }
+    }
+    return builder_to_string(*sb);
+}
+
+write_create_func :: (sb: *String_Builder, sc: *Schema) {
+    useful_mems: [..]Schema_Member;
+    ret_mems: [..]Schema_Member;
     for sc.members {
         if !match_strings(it.name, EXCLUDE_MEMBERS) {
-            array_add(*useful_mems, it.name);
+            array_add(*useful_mems, it);
         }
 
         if match_strings(it.name, RETURN_MEMBERS) {
-            array_add(*ret_mems, it.name);
+            array_add(*ret_mems, it);
         }
     }
 
-    append(sb, join(..useful_mems, ", "));
-    append(sb, ")\nVALUES (");
-    for 0..useful_mems.count - 1 {
-        append(sb, "?");
-        if it != useful_mems.count - 2 {
-            append(sb, ", ");
-        }
-    }
-    append(sb, ")\nRETURNING ");
-    append(sb, join(..ret_mems, ", "));
-    append(sb, "`\n\n");
+    print(sb, "func Create%(% *%, db *sql.DB) error {\n", sc.go_name, sc.var_name, sc.go_name);
+    print(sb, "    q := `INSERT INTO % (%) ", sc.name, join_sql_name(useful_mems));
+    print(sb, "VALUES (%) ", repeat_string("?", useful_mems.count));
+    print(sb, "RETURNING %`\n\n", join_sql_name(ret_mems));
+
     append(sb, CONTEXT_STR);
     append(sb, "\n");
 
-    // TODO: not finished
+    print(sb, "    err := db.QueryRowContext(ctx, q, %)", join_go_name(useful_mems, sprint("%.", sc.var_name)));
+
+    print(sb, ".Scan(%)\n\n", join_go_name(ret_mems, sprint("&%.", sc.var_name)));
+    append(sb, EN_STR);
     append(sb, "}\n\n");
 }
 
