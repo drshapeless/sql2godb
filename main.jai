@@ -57,6 +57,9 @@ parse_sql :: (file_name: string) -> string {
         fill_names(sc);
         write_struct(*sb, sc);
         write_create_func(*sb, sc);
+        write_get_func(*sb, sc);
+        write_update_func(*sb, sc);
+        write_delete_func(*sb, sc);
     }
 
     return builder_to_string(*sb);
@@ -276,13 +279,14 @@ repeat_string :: (s: string, count: int, separator := ", ") -> string {
     return builder_to_string(*sb);
 }
 
-join_sql_name :: (mems: []Schema_Member) -> string {
+join_sql_name :: (mems: []Schema_Member, suffix := "", separator := ", ") -> string {
     sb: String_Builder;
 
     for mems {
         append(*sb, it.name);
+        append(*sb, suffix);
         if it_index < mems.count - 1 {
-            append(*sb, ", ");
+            append(*sb, separator);
         }
     }
 
@@ -328,6 +332,92 @@ write_create_func :: (sb: *String_Builder, sc: *Schema) {
     print(sb, ".Scan(%)\n\n", join_go_name(ret_mems, sprint("&%.", sc.var_name)));
     append(sb, EN_STR);
     append(sb, "}\n\n");
+}
+
+ROWS_STR :: #string DONE
+    rows, err := db.QueryContext(ctx, q, id)
+    if err != nil {
+        return nil, err
+    }
+DONE
+
+write_get_func :: (sb: *String_Builder, sc: *Schema) {
+    // This function assume every schema has a field named "id"
+    id_mem: Schema_Member;
+    for sc.members {
+        if it.name == "id" {
+            id_mem = it;
+        }
+    }
+
+    print(sb, "func Get%(% %, db *sql.DB) (*%, error) {\n", sc.go_name, id_mem.name, id_mem.type, sc.go_name);
+
+    print(sb, "    q := `SELECT * FROM % WHERE id = ?`\n\n", sc.name);
+    append(sb, CONTEXT_STR);
+    append(sb, "\n");
+
+    append(sb, ROWS_STR);
+
+    print(sb, "    var % %\n", sc.var_name, sc.go_name);
+    print(sb, "    err = sqlscan.ScanOne(&%, rows)\n", sc.var_name);
+    append(sb, "    if err != nil {\n        return nil, err\n    }\n\n");
+    print(sb, "    return &%, nil\n", sc.var_name);
+
+    append(sb, "}\n\n");
+}
+
+write_update_func :: (sb: *String_Builder, sc: *Schema) {
+    // This function assume the sc has id and version
+    useful_mems: [..]Schema_Member;
+    ret_mems: [..]Schema_Member;
+    for sc.members {
+        if !match_strings(it.name, EXCLUDE_MEMBERS) {
+            array_add(*useful_mems, it);
+        }
+
+        if match_strings(it.name, RETURN_MEMBERS) {
+            array_add(*ret_mems, it);
+        }
+    }
+
+    print(sb, "func Update%(% *%, db *sql.DB) error {\n", sc.go_name, sc.var_name, sc.go_name);
+    print(sb, "    q := `UPDATE % SET %, version = version + 1 WHERE % RETURNING version`", sc.name, join_sql_name(useful_mems, " = ?"), join_sql_name(ret_mems, " = ?", " AND "));
+
+    append(sb, "\n\n");
+    append(sb, CONTEXT_STR);
+    append(sb, "\n");
+
+    print(sb, "    err := db.QueryRowContext(ctx, q, %, %.Version).Scan(&%.Version)", join_go_name(useful_mems, sprint("%.", sc.var_name)), sc.var_name, sc.var_name);
+
+    append(sb, "\n\n");
+
+    append(sb, "    if err != nil {\n        return err\n    }\n\n");
+    append(sb, "    return nil\n");
+    append(sb, "}\n\n");
+}
+
+write_delete_func :: (sb: *String_Builder, sc: *Schema) {
+    // This function assume every schema has a field named "id"
+    id_mem: Schema_Member;
+    for sc.members {
+        if it.name == "id" {
+            id_mem = it;
+        }
+    }
+
+    print(sb, "func Delete%(id %, db *sql.DB) error {\n", sc.go_name, id_mem.type);
+    print(sb, "    q := `DELETE FROM % WHERE id = ?`\n\n", sc.name);
+
+    append(sb, CONTEXT_STR);
+    append(sb, "\n\n");
+
+    append(sb, "    result, err := db.ExecContext(ctx, q, id)\n");
+    append(sb, "    if err != nil {\n        return err\n    }\n\n");
+
+    append(sb, "    rowsAffected, _ := result.RowsAffected()\n\n");
+    append(sb, "    if rowsAffected == 0 {\n        return sql.ErrNoRows\n    }\n\n");
+    append(sb, "    return nil\n");
+    append(sb, "}\n");
 }
 
 #import "Basic";
