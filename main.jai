@@ -58,7 +58,9 @@ parse_sql :: (file_name: string) -> string {
         write_struct(*sb, sc);
         write_create_func(*sb, sc);
         write_get_func(*sb, sc);
-        write_update_func(*sb, sc);
+        if has_version_member(sc) {
+            write_update_func(*sb, sc);
+        }
         write_delete_func(*sb, sc);
     }
 
@@ -418,6 +420,16 @@ write_delete_func :: (sb: *String_Builder, sc: *Schema) {
     append(sb, "    if rowsAffected == 0 {\n        return sql.ErrNoRows\n    }\n\n");
     append(sb, "    return nil\n");
     append(sb, "}\n");
+}
+
+has_version_member :: (sc: *Schema) -> bool {
+    for sc.members {
+        if it.name == "version" {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 #import "Basic";
